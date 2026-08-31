@@ -53,7 +53,7 @@ def test_build_status_matches_agent_shape(tmp_path: Path) -> None:
             "additional_script": "",
         }
     )
-    st = build_status(cfg, include_secrets=False)
+    st = build_status(cfg, state_dir=base, include_secrets=False)
     assert "hosts" in st
     h = st["hosts"][0]
     assert h["section"] == hid

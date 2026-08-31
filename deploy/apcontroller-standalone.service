@@ -9,12 +9,31 @@ User=apcontroller
 Group=apcontroller
 WorkingDirectory=/opt/apcontroller/backend
 Environment=APCTRL_CONFIG_PATH=/var/lib/apcontroller/config.json
+Environment=APCTRL_STATE_DIR=/var/lib/apcontroller
 Environment=APCTRL_BUNDLE_PATH=/opt/apcontroller/share/apcontroller
 Environment=APCTRL_STATIC_DIR=/opt/apcontroller/frontend/dist
-Environment=APCTRL_CORS_ORIGINS=*
-# Environment=APCTRL_API_KEY=change-me
-ExecStart=/opt/apcontroller/backend/.venv/bin/uvicorn apctl.main:app --host 0.0.0.0 --port 8080
+# Bind loopback by default; expose remotely only via a TLS reverse proxy.
+Environment=APCTRL_HOST=127.0.0.1
+Environment=APCTRL_PORT=8080
+# No cross-origin access by default (SPA is same-origin).
+Environment=APCTRL_CORS_ORIGINS=
+# To bind a LAN interface you MUST set an API key. Keep it out of the unit file
+# by putting APCTRL_API_KEY=... in a 0600 file and uncommenting:
+# EnvironmentFile=/etc/apcontroller/apcontroller.env
+# Launch via the module so the fail-closed bind guard runs.
+ExecStart=/opt/apcontroller/backend/.venv/bin/python -m apctl
 Restart=on-failure
+
+# --- sandboxing ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/apcontroller
 
 [Install]
 WantedBy=multi-user.target

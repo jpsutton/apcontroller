@@ -47,8 +47,17 @@ class ConfigStore:
     def _write_unlocked(self, cfg: RootConfig) -> None:
         data: dict[str, Any] = cfg.model_dump(by_alias=True, mode="json")
         tmp = self.path.with_suffix(".tmp")
+        # config.json holds SSH passwords and Wi-Fi PSKs; keep it non-world-readable.
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
         tmp.replace(self.path)
+        try:
+            self.path.chmod(0o600)
+        except OSError:
+            pass
 
     def mutate(self, fn: Callable[[RootConfig], RootConfig]) -> RootConfig:
         with self._lock:

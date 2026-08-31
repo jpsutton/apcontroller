@@ -1,16 +1,27 @@
 services:
   apcontroller:
     build: .
+    # Published on host loopback only. To expose on the LAN, change this to
+    # "0.0.0.0:8084:8080" AND set APCTRL_API_KEY (and remove APCTRL_ALLOW_INSECURE_BIND).
     ports:
-      - "8084:8080"
+      - "127.0.0.1:8084:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
       - apctrl-data:/data
       # Optional: mount a read-only SSH private key used by device entries (set keyfile path in UI accordingly).
       # - ${HOME}/.ssh:/ssh:ro
     environment:
-      # If set, all /api/v1/* routes require header X-API-Key.
+      # The API is fail-closed on a non-loopback bind. Either set an API key:
+      #   APCTRL_API_KEY: "<a long random secret>"
+      # or, because the port above is mapped to host loopback only, acknowledge
+      # the container's internal 0.0.0.0 bind with the opt-out below.
       APCTRL_API_KEY: ${APCTRL_API_KEY:-}
-      APCTRL_CORS_ORIGINS: ${APCTRL_CORS_ORIGINS:-*}
+      APCTRL_ALLOW_INSECURE_BIND: ${APCTRL_ALLOW_INSECURE_BIND:-1}
+      # Empty = no cross-origin access (the SPA is served same-origin). Only set
+      # explicit origins if you serve the UI from a different origin.
+      APCTRL_CORS_ORIGINS: ${APCTRL_CORS_ORIGINS:-}
 
 volumes:
   apctrl-data:
