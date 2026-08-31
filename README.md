@@ -72,6 +72,86 @@ docker compose up
 
 Mount a volume on `/data` for persistent `config.json`. Mount host SSH keys if you use key-based login and set each device’s **Key file** path to the in-container mount (for example `/ssh/id_ed25519`).
 
+## Deploy from the published image (GHCR)
+
+CI builds a multi-arch image (`linux/amd64`, `linux/arm64`) and publishes it to the
+GitHub Container Registry on every push to `main` and every `v*` tag. You don't
+need to build locally — just pull and run.
+
+**Image:** `ghcr.io/jpsutton/apcontroller`
+
+| Tag | Points at |
+|-----|-----------|
+| `latest` | newest build of the default branch |
+| `vX.Y.Z`, `X.Y`, `X` | a released version tag (`v1.2.3`) |
+| `sha-<short>` | a specific commit |
+| `main` | the default branch |
+
+For production, pin to a version tag or a digest (`ghcr.io/jpsutton/apcontroller@sha256:…`)
+rather than `latest`.
+
+### Pull
+
+The package is **private by default**. Either make it public (GitHub → repo →
+*Packages* → the package → *Package settings* → *Change visibility*), after which
+no auth is needed to pull:
+
+```bash
+docker pull ghcr.io/jpsutton/apcontroller:latest
+```
+
+…or, to keep it private, log in first with a token that has the `read:packages`
+scope:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
+docker pull ghcr.io/jpsutton/apcontroller:latest
+```
+
+### Run
+
+```bash
+docker run -d --name apcontroller \
+  -p 8080:8080 \
+  -v apctrl-data:/data \
+  -e APCTRL_API_KEY="$(openssl rand -hex 32)" \
+  ghcr.io/jpsutton/apcontroller:latest
+```
+
+- `/data` holds the persistent `config.json` — keep it on a named volume or bind mount.
+- Set `APCTRL_API_KEY` and send `X-API-Key` on every `/api/v1/*` request (see
+  [Environment variables](#environment-variables)); put the app behind a TLS
+  reverse proxy for anything beyond localhost.
+- To use SSH key-based device login, mount your key read-only and set each
+  device's **Key file** path accordingly:
+  `-v $HOME/.ssh:/ssh:ro` then use `/ssh/id_ed25519` in the UI.
+
+Or with Compose, swap `build: .` for the published image:
+
+```yaml
+services:
+  apcontroller:
+    image: ghcr.io/jpsutton/apcontroller:latest   # or :vX.Y.Z
+    ports:
+      - "8084:8080"
+    volumes:
+      - apctrl-data:/data
+    environment:
+      APCTRL_API_KEY: ${APCTRL_API_KEY:-}
+volumes:
+  apctrl-data:
+```
+
+### Cutting a release
+
+Push a semver tag; the workflow publishes the matching `vX.Y.Z` / `X.Y` / `X`
+image tags:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 ## TLS (reverse proxy)
 
 Terminate TLS in front of the app (recommended). Example **Caddy**:
