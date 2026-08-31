@@ -1,0 +1,355 @@
+#!/bin/sh
+
+FILE=$1
+[ -s "$FILE" ] || exit 1
+
+[ -e /etc/config/wireless ] || exit 1
+
+function wifi_add() {
+	local RADIO=$1
+	local NETWORK=$2
+	local ENABLED=$3
+	local SSID=$4
+	local ENCRYPTION=$5
+	local KEY=$6
+	local HIDDEN=$7
+	local ISOLATE=$8
+
+	CNT=$(uci show wireless | awk '/\.device=/ {count++} END {print count + 1}')
+	while [ -n "$(uci -q get wireless.wifinet"$CNT")" ]; do
+		CNT=$((CNT + 1))
+	done
+	SEC="wifinet${CNT}"
+
+	uci set wireless."$SEC"=wifi-iface
+	uci set wireless."$SEC".device=$RADIO
+	uci set wireless."$SEC".mode=ap
+	uci set wireless."$SEC".network="$NETWORK"
+	if [ "$ENABLED" -eq 0 ]; then
+		uci set wireless."$SEC".disabled=1
+	else
+		uci -q del wireless."$RADIO".disabled
+	fi
+	uci set wireless."$SEC".ssid="$SSID"
+	uci set wireless."$SEC".encryption="$ENCRYPTION"
+	uci set wireless."$SEC".key="$KEY"
+	uci set wireless."$SEC".hidden="${HIDDEN:-0}"
+	uci set wireless."$SEC".isolate="${ISOLATE:-0}"
+}
+
+function wifi_update() {
+	local SEC=$1
+	local RADIO=$2
+	local NETWORK=$3
+	local ENABLED=$4
+	local SSID=$5
+	local ENCRYPTION=$6
+	local KEY=$7
+	local HIDDEN=$8
+	local ISOLATE=$9
+
+	uci -q del wireless."$RADIO".disabled
+	if [ "$ENABLED" -eq 0 ]; then
+		uci set wireless."$SEC".disabled=1
+	else
+		uci -q del wireless."$RADIO".disabled
+		uci -q del wireless."$SEC".disabled
+	fi
+	uci set wireless."$SEC".network="$NETWORK"
+	uci set wireless."$SEC".ssid="$SSID"
+	uci set wireless."$SEC".encryption="$ENCRYPTION"
+	uci set wireless."$SEC".key="$KEY"
+	uci set wireless."$SEC".hidden="${HIDDEN:-0}"
+	uci set wireless."$SEC".isolate="${ISOLATE:-0}"
+}
+
+# Echo the uci section reference of the `config device` whose name matches $1
+# (e.g. "br-lan"), or nothing if there is no such bridge device section.
+function find_dev_section() {
+	uci show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)\.name='$1'\$/\1/p" | head -1
+}
+
+# Find an existing bridge-vlan section for device $1 / vlan $2; echo its
+# section reference (sets nothing) or return non-zero.
+function find_bvlan() {
+	local S
+	for S in $(uci show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=bridge-vlan$/\1/p'); do
+		[ "$(uci -q get network."$S".device)" = "$1" ] || continue
+		[ "$(uci -q get network."$S".vlan)" = "$2" ] || continue
+		printf '%s\n' "$S"
+		return 0
+	done
+	return 1
+}
+
+# Ensure a bridge-vlan section exists for device $1 / vlan $2; sets global BV
+# to the (existing or newly created) section reference.
+function ensure_bvlan() {
+	BV=$(find_bvlan "$1" "$2")
+	if [ -z "$BV" ]; then
+		BV=$(uci add network bridge-vlan)
+		uci set network."$BV".device="$1"
+		uci set network."$BV".vlan="$2"
+	fi
+}
+
+# Keep the untagged management VLAN reachable on every existing port of bridge
+# device $1 (untagged + PVID) before any tagged VLAN is added, so enabling
+# bridge VLAN filtering does not strand the management link. Idempotent; runs
+# at most once per device via MGMT_DONE.
+MGMT_DONE=""
+function ensure_mgmt() {
+	case " $MGMT_DONE " in
+		*" $1 "*) return 0 ;;
+	esac
+	MGMT_DONE="$MGMT_DONE $1"
+
+	local DEV_SEC PORTS P
+	DEV_SEC=$(find_dev_section "$1")
+	if [ -z "$DEV_SEC" ]; then
+		echo "bridge device $1 not found; skipping VLAN provisioning"
+		return 1
+	fi
+	PORTS=$(uci -q get network."$DEV_SEC".ports)
+
+	ensure_bvlan "$1" "$mgmt_vlan"
+	uci -q del network."$BV".ports
+	for P in $PORTS; do
+		uci add_list network."$BV".ports="${P}:u*"
+	done
+	# The bridge's own CPU/local port is NOT named in the ports list; netifd's
+	# per-bridge-vlan `local` flag (default on) makes br-lan a member so the
+	# management L3 interface (moved onto br-lan.<mgmt_vlan>) stays reachable.
+	return 0
+}
+
+# Provision one tagged VLAN: management safety entry, the tagged bridge-vlan on
+# the trunk port only, and the L3 interface SSIDs attach to. Returns non-zero
+# (skips) when the bridge device is missing. $1=device $2=tag $3=interface name
+function provision_vlan() {
+	[ -n "$2" ] || return 1
+	[ "$2" = "0" ] && return 1
+	ensure_mgmt "$1" || return 1
+
+	ensure_bvlan "$1" "$2"
+	uci -q del network."$BV".ports
+	uci add_list network."$BV".ports="${trunk_port}:t"
+
+	# proto=none L3 stub; its device br-lan.<tag> is the bridge VLAN sub-interface
+	# the SSID attaches to. `local` stays default (1) so the bridge terminates the
+	# tag locally and br-lan.<tag> can carry the SSID's traffic.
+	uci set network."$3"=interface
+	uci set network."$3".device="${1}.${2}"
+	uci set network."$3".proto=none
+	return 0
+}
+
+# Move the management L3 interface off the raw bridge ($1, e.g. br-lan) onto the
+# untagged VLAN sub-interface (br-lan.<mgmt_vlan>). On DSA targets a raw-bridge
+# L3 interface loses reachability the moment VLAN filtering turns on; binding it
+# to the sub-interface is the field-proven fix. Idempotent.
+function move_mgmt_l3() {
+	local DEV=$1 MV=$2 S IFDEV
+	for S in $(uci show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		IFDEV=$(uci -q get network."$S".device)
+		[ "$IFDEV" = "$DEV" ] || continue
+		uci set network."$S".device="${DEV}.${MV}"
+	done
+}
+
+# Detached watchdog: snapshot the current network/wireless, then in the
+# background restore them and restart networking after $1 seconds UNLESS a
+# disarm flag appears. The controller disarms once it re-verifies connectivity;
+# if the apply strands management, the AP self-heals back to the old config.
+ROLLBACK_FLAG=/tmp/apctl-rollback-disarm
+ROLLBACK_BAK=/tmp/apctl-rollback-bak
+function arm_rollback() {
+	local secs=$1
+	rm -rf "$ROLLBACK_BAK"
+	mkdir -p "$ROLLBACK_BAK"
+	cp /etc/config/network "$ROLLBACK_BAK/network"
+	[ -e /etc/config/wireless ] && cp /etc/config/wireless "$ROLLBACK_BAK/wireless"
+	rm -f "$ROLLBACK_FLAG"
+
+	# Write the watchdog to its own file and detach it; inlining via `sh -c` with
+	# a backgrounded var would word-split the body. The heredoc bakes in secs and
+	# paths now, while \$i stays literal for run time.
+	cat > /tmp/apctl-rollback.sh <<EOF
+#!/bin/sh
+i=0
+while [ \$i -lt $secs ]; do
+	[ -f $ROLLBACK_FLAG ] && exit 0
+	sleep 5
+	i=\$((i + 5))
+done
+[ -f $ROLLBACK_FLAG ] && exit 0
+cp $ROLLBACK_BAK/network /etc/config/network
+[ -e $ROLLBACK_BAK/wireless ] && cp $ROLLBACK_BAK/wireless /etc/config/wireless
+/etc/init.d/network restart
+wifi reload 2>/dev/null
+EOF
+	chmod +x /tmp/apctl-rollback.sh
+	if command -v setsid >/dev/null 2>&1; then
+		setsid /tmp/apctl-rollback.sh </dev/null >/dev/null 2>&1 &
+	else
+		/tmp/apctl-rollback.sh </dev/null >/dev/null 2>&1 &
+	fi
+}
+
+. /usr/share/libubox/jshn.sh
+
+NEEDCOMMIT=0
+NETCOMMIT=0
+
+json_load_file "$FILE"
+
+json_is_a wifis array || exit 2
+
+json_get_var delete delete
+json_get_var trunk_port trunk_port
+json_get_var mgmt_vlan mgmt_vlan
+json_get_var dumb_ap dumb_ap
+json_get_var rollback_secs rollback_secs
+[ -n "$mgmt_vlan" ] || mgmt_vlan=1
+[ -n "$rollback_secs" ] || rollback_secs=180
+
+if [ "${dumb_ap:-1}" -eq 1 ]; then
+	for _svc in dnsmasq odhcpd firewall; do
+		/etc/init.d/"$_svc" stop 2>/dev/null
+		/etc/init.d/"$_svc" disable 2>/dev/null
+	done
+else
+	for _svc in dnsmasq odhcpd firewall; do
+		/etc/init.d/"$_svc" enable 2>/dev/null
+		/etc/init.d/"$_svc" start 2>/dev/null
+	done
+fi
+
+# Provision VLAN interfaces / bridge VLAN filtering before touching wireless so
+# the network sections referenced by wifi-ifaces already exist. Only done when a
+# trunk/uplink port is configured, to avoid half-configured filtering.
+if json_is_a vlans array && [ -n "$trunk_port" ]; then
+	json_select vlans
+	VIDX=1
+	while json_is_a $VIDX object; do
+		json_select $VIDX
+		json_get_vars name tag device
+		[ -n "$device" ] || device=br-lan
+		if provision_vlan "$device" "$tag" "$name"; then
+			NETCOMMIT=1
+		fi
+		json_select ..
+		VIDX=$((VIDX + 1))
+	done
+	json_select ..
+fi
+if [ "$NETCOMMIT" -eq 1 ]; then
+	# Snapshot + arm the self-healing rollback BEFORE committing the bridge/VLAN
+	# changes that could strand management, move the management L3 interface onto
+	# the untagged VLAN sub-interface, then commit. The actual (link-flapping)
+	# network restart is deferred to a detached runner at the end so this SSH
+	# session returns cleanly first; see below.
+	arm_rollback "$rollback_secs"
+	move_mgmt_l3 br-lan "$mgmt_vlan"
+	uci commit network
+fi
+
+if [ "x$delete" = "x1" ]; then
+	EXISTING=$(uci show wireless | awk -F[.=] '/=wifi-iface$/{print $2}')
+	for SECTION in $EXISTING; do
+		uci -q del wireless."$SECTION"
+	done
+	NEEDCOMMIT=1
+fi
+
+json_select "wifis"
+IDX=1
+while json_is_a $IDX object; do
+	json_select $IDX
+	json_get_vars enabled band network ssid encryption key hidden isolate
+
+	[ -e /tmp/apcontroller.user ] && sh /tmp/apcontroller-agent-as "$enabled" "$ssid" "$band" "$network"
+
+	T=$(uci -q get network."$network")
+	if [ -z "$T" ]; then
+		IDX=$((IDX + 1))
+		json_select ..
+		continue
+	fi
+
+	RADIOS=""
+	case "$band" in
+		"2g")
+			RADIOS=$(uci show wireless | awk -F. '/\.hwmode='\''11g'\''$|\.band='\''2g'\''/{print $2}')
+			;;
+		"5g")
+			RADIOS=$(uci show wireless | awk -F. '/\.hwmode='\''11a'\''$|\.band='\''5g'\''/{print $2}')
+			;;
+		"6g")
+			RADIOS=$(uci show wireless | awk -F. '/\.band='\''6g'\''/{print $2}')
+			;;
+	esac
+	if [ -z "$RADIOS" ]; then
+		IDX=$((IDX + 1))
+		json_select ..
+		continue
+	fi
+
+	SECTIONS=$(uci -q show wireless | awk -F. '/\.ssid='\'''"$ssid"''\''$/{print $2}')
+	if [ -z "$SECTIONS" ]; then
+		for RADIO in $RADIOS; do
+			wifi_add "$RADIO" "$network" "$enabled" "$ssid" "$encryption" "$key" "$hidden" "$isolate"
+		done
+		NEEDCOMMIT=1
+	else
+		for RADIO in $RADIOS; do
+			FOUND=0
+			for SECTION in $SECTIONS; do
+				T1=$(uci get wireless."$SECTION".device)
+				if [ "$T1" = "$RADIO" ]; then
+					wifi_update "$SECTION" "$RADIO" "$network" "$enabled" "$ssid" "$encryption" "$key" "$hidden" "$isolate"
+					NEEDCOMMIT=1
+					FOUND=1
+				fi
+			done
+			if [ $FOUND -eq 0 ]; then
+				wifi_add "$RADIO" "$network" "$enabled" "$ssid" "$encryption" "$key" "$hidden" "$isolate"
+				NEEDCOMMIT=1
+			fi
+		done
+	fi
+
+	IDX=$((IDX + 1))
+	json_select ..
+done
+
+if [ $NEEDCOMMIT -eq 1 ]; then
+	uci commit wireless
+fi
+
+# Apply. When the bridge/VLAN config changed, the network restart can flap the
+# management link, so defer it to a detached runner (with a short delay) that
+# survives this SSH session closing; the armed watchdog self-heals if it strands
+# management. With only wireless changes there is no link risk, so reload inline.
+if [ "$NETCOMMIT" -eq 1 ]; then
+	cat > /tmp/apctl-apply.sh <<'EOF'
+#!/bin/sh
+sleep 2
+/etc/init.d/network restart
+wifi reload 2>/dev/null
+EOF
+	chmod +x /tmp/apctl-apply.sh
+	if command -v setsid >/dev/null 2>&1; then
+		setsid /tmp/apctl-apply.sh </dev/null >/dev/null 2>&1 &
+	else
+		/tmp/apctl-apply.sh </dev/null >/dev/null 2>&1 &
+	fi
+elif [ $NEEDCOMMIT -eq 1 ]; then
+	wifi reload
+fi
+
+rm "$FILE"
+[ -e /tmp/apcontroller.user ] && rm /tmp/apcontroller.user
+[ -e /tmp/apcontroller-agent-as ] && rm /tmp/apcontroller-agent-as
+
+exit 0

@@ -1,0 +1,20 @@
+[Unit]
+Description=AP Controller (standalone off LuCI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apcontroller
+Group=apcontroller
+WorkingDirectory=/opt/apcontroller/backend
+Environment=APCTRL_CONFIG_PATH=/var/lib/apcontroller/config.json
+Environment=APCTRL_BUNDLE_PATH=/opt/apcontroller/share/apcontroller
+Environment=APCTRL_STATIC_DIR=/opt/apcontroller/frontend/dist
+Environment=APCTRL_CORS_ORIGINS=*
+# Environment=APCTRL_API_KEY=change-me
+ExecStart=/opt/apcontroller/backend/.venv/bin/uvicorn apctl.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

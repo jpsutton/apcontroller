@@ -1,0 +1,16 @@
+services:
+  apcontroller:
+    build: .
+    ports:
+      - "8084:8080"
+    volumes:
+      - apctrl-data:/data
+      # Optional: mount a read-only SSH private key used by device entries (set keyfile path in UI accordingly).
+      # - ${HOME}/.ssh:/ssh:ro
+    environment:
+      # If set, all /api/v1/* routes require header X-API-Key.
+      APCTRL_API_KEY: ${APCTRL_API_KEY:-}
+      APCTRL_CORS_ORIGINS: ${APCTRL_CORS_ORIGINS:-*}
+
+volumes:
+  apctrl-data:

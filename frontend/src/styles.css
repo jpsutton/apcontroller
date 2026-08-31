@@ -1,0 +1,294 @@
+:root {
+  font-family: system-ui, sans-serif;
+  line-height: 1.4;
+  color: #1a1a1a;
+  background: #f4f4f5;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.tabbed {
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  background: #f4f4f5;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 0px 8px 8px 8px;
+  padding: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  border: 1px solid #e5e5e5;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+}
+
+th {
+  background: #f9fafb;
+}
+
+.err {
+  color: #b91c1c;
+  margin: 0.5rem 0;
+}
+
+.ok {
+  color: #15803d;
+}
+
+.actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* A flex <td> drops out of the table's row-height equalization and shrinks to
+   its own content. Keep the cell a normal table-cell and let an inner .actions
+   wrapper do the flex layout so the cell matches its siblings' height. */
+td.actions-cell {
+  vertical-align: middle;
+}
+
+/* OpenWrt / LuCI-inspired controls (cbi-button family) */
+.app button[type="button"] {
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  padding: 0.45rem 0.85rem;
+  min-height: 2rem;
+  border-radius: 3px;
+  border: 1px solid #bbb;
+  background-color: #fff;
+  background-image: linear-gradient(to bottom, #fff 0%, #ececec 100%);
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.app button[type="button"]:hover:not(:disabled) {
+  border-color: #999;
+  background-image: linear-gradient(to bottom, #fafafa 0%, #e2e2e2 100%);
+}
+
+.app button[type="button"]:active:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #999;
+}
+
+.app button[type="button"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.app button[type="button"]:focus-visible {
+  outline: 2px solid #2779aa;
+  outline-offset: 1px;
+}
+
+.app button[type="button"].btn-action {
+  color: #fff;
+  border: 1px solid #1a5a80;
+  background: #2779aa;
+  background-image: linear-gradient(to bottom, #2a82b6 0%, #236f9c 100%);
+}
+
+.app button[type="button"].btn-action:hover:not(:disabled) {
+  border-color: #164a6b;
+  background-image: linear-gradient(to bottom, #2f8bc4 0%, #2779aa 100%);
+}
+
+.app button[type="button"].btn-action:active:not(:disabled) {
+  background: #236f9c;
+  background-image: none;
+}
+
+.app button[type="button"].btn-positive {
+  color: #198f5b;
+  border-color: #198f5b;
+  background: #fff;
+  background-image: none;
+}
+
+.app button[type="button"].btn-positive:hover:not(:disabled) {
+  color: #146b45;
+  border-color: #146b45;
+  background: #f4faf7;
+}
+
+.app button[type="button"].btn-positive:active:not(:disabled) {
+  background: #e8f2ec;
+}
+
+.app button[type="button"].btn-remove {
+  color: #c43232;
+  border-color: #d9534f;
+  background: #fff;
+  background-image: none;
+}
+
+.app button[type="button"].btn-remove:hover:not(:disabled) {
+  color: #a52828;
+  border-color: #c9302c;
+  background: #fdf5f5;
+}
+
+.app button[type="button"].btn-remove:active:not(:disabled) {
+  background: #f8e8e8;
+}
+
+.app .tabbed .tabs > button[type="button"] {
+  min-height: unset;
+  padding: 0.5rem 1rem;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  background: #fff;
+  background-image: none;
+  color: #1a1a1a;
+}
+
+.app .tabbed .tabs > button[type="button"]:hover:not(:disabled) {
+  background: #f7f7f7;
+  border-color: #ccc;
+  background-image: none;
+}
+
+.app .tabbed .tabs > button[type="button"].active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.app .tabbed .tabs > button[type="button"].active:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.app button[type="button"].sm {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.45rem;
+  min-height: unset;
+}
+
+textarea.mono {
+  width: 100%;
+  min-height: 200px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 8px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: auto;
+  min-width: 320px;
+}
+
+label {
+  display: block;
+  margin: 0.35rem 0 0.1rem;
+  font-size: 0.85rem;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+select {
+  width: 100%;
+  max-width: 28rem;
+  padding: 0.35rem;
+  box-sizing: border-box;
+}
+
+.row-editor {
+  border: 1px dashed #ccc;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  border-radius: 6px;
+}
+
+.stats {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.stat {
+  flex: 1 1 120px;
+  text-align: center;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.stat strong {
+  display: block;
+  font-size: 1.4rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.throbber {
+  display: inline-block;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 3px solid #d1d5db;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.5rem;
+}
+
+.ping-loading {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0;
+  color: #6b7280;
+}
