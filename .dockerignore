@@ -4,6 +4,16 @@
 **/__pycache__
 **/*.pyc
 .git
+**/data
 data
+# Never let secrets enter the build context / image layers.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/id_*
+**/*.p12
+**/.venv
+backend/.venv
 *.md
 !README.md

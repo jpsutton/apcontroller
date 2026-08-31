@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, apiGetText, apiPost, apiPostJson, apiPutJson } from "./api";
+import { safeHref } from "./url";
 import type {
   ActivityPoint,
   ClientRow,
@@ -72,7 +73,7 @@ export default function App() {
     setErr(null);
     try {
       const [c, s] = await Promise.all([
-        apiGet<RootConfig>("/api/v1/config"),
+        apiGet<RootConfig>("/api/v1/config?include_secrets=true"),
         apiGet<{ hosts: StatusHost[] }>("/api/v1/status?include_secrets=true"),
       ]);
       setCfg(c);
@@ -309,8 +310,8 @@ function DevicesTab({
               <tr key={h.id}>
                 <td>{h.enabled ? "yes" : "no"}</td>
                 <td>
-                  {h.url ? (
-                    <a href={h.url} target="_blank" rel="noreferrer">
+                  {safeHref(h.url) ? (
+                    <a href={safeHref(h.url)} target="_blank" rel="noreferrer">
                       {h.name || h.id}
                     </a>
                   ) : (
@@ -1181,7 +1182,11 @@ function SettingsTab({
   return (
     <section>
       <label>Data directory (status cache)</label>
-      <input type="text" value={g.path} onChange={(e) => setG({ ...g, path: e.target.value })} />
+      <input type="text" value={g.path} readOnly disabled />
+      <p className="hint">
+        Set on the server via <code>APCTRL_STATE_DIR</code> (defaults next to the config file).
+        This field is retained for config compatibility but no longer changes where the controller writes.
+      </p>
       <label>Poll interval (minutes)</label>
       <input
         type="number"

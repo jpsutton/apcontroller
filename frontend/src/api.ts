@@ -1,10 +1,10 @@
 const base = import.meta.env.VITE_API_BASE ?? "";
-const key = import.meta.env.VITE_API_KEY ?? "";
 
+// The SPA sends no API key of its own. On localhost the backend runs keyless;
+// for remote/LAN use it sits behind a reverse proxy that supplies auth (and, if
+// desired, injects X-API-Key). This keeps any secret out of the shipped bundle.
 function headers(init?: HeadersInit): HeadersInit {
-  const h = new Headers(init);
-  if (key) h.set("X-API-Key", key);
-  return h;
+  return new Headers(init);
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

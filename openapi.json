@@ -194,6 +194,16 @@
         "operationId": "api_get_config_api_v1_config_get",
         "parameters": [
           {
+            "name": "include_secrets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Secrets"
+            }
+          },
+          {
             "name": "x-api-key",
             "in": "header",
             "required": false,
@@ -837,6 +847,8 @@
           },
           "port": {
             "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
             "title": "Port",
             "default": 22
           },
@@ -864,6 +876,23 @@
             "type": "string",
             "title": "Url",
             "default": ""
+          },
+          "trunk_port": {
+            "type": "string",
+            "title": "Trunk Port",
+            "default": ""
+          },
+          "mgmt_vlan": {
+            "type": "integer",
+            "maximum": 4094.0,
+            "minimum": 1.0,
+            "title": "Mgmt Vlan",
+            "default": 1
+          },
+          "dumb_ap": {
+            "type": "boolean",
+            "title": "Dumb Ap",
+            "default": true
           }
         },
         "type": "object",
@@ -890,6 +919,13 @@
             },
             "type": "array",
             "title": "Wifis"
+          },
+          "vlans": {
+            "items": {
+              "$ref": "#/components/schemas/Vlan"
+            },
+            "type": "array",
+            "title": "Vlans"
           },
           "groups": {
             "items": {
@@ -977,6 +1013,36 @@
         ],
         "title": "ValidationError"
       },
+      "Vlan": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "vlan_id": {
+            "type": "integer",
+            "maximum": 4094.0,
+            "minimum": 1.0,
+            "title": "Vlan Id"
+          },
+          "device": {
+            "type": "string",
+            "title": "Device",
+            "default": "br-lan"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vlan_id"
+        ],
+        "title": "Vlan"
+      },
       "Wifi": {
         "properties": {
           "id": {
@@ -1029,6 +1095,11 @@
             "type": "string",
             "title": "Network",
             "default": "lan"
+          },
+          "vlan": {
+            "type": "string",
+            "title": "Vlan",
+            "default": ""
           }
         },
         "type": "object",

@@ -43,13 +43,19 @@ This standalone port is released under the same **GNU GPLv3** license as the ori
 
    Vite proxies `/api` and `/health` to `http://127.0.0.1:8080`.
 
-3. Optional **API key** (recommended outside localhost):
+3. **API key / exposure.** By default the server binds `127.0.0.1` and needs no
+   key for local use. Binding a non-loopback interface **requires** an API key
+   (see [Security](#security)):
 
    ```bash
-   export APCTRL_API_KEY=change-me
+   export APCTRL_API_KEY=$(openssl rand -hex 32)
+   export APCTRL_HOST=0.0.0.0   # only behind a TLS reverse proxy
    ```
 
-   Send header `X-API-Key: change-me` on every `/api/v1/*` request. The Vite dev server does not inject this automatically: create `frontend/.env.local` with `VITE_API_KEY=change-me`.
+   When a key is set, send header `X-API-Key: <key>` on every `/api/v1/*`
+   request. The SPA itself sends no key: serve it same-origin on loopback, or
+   put a reverse proxy in front that supplies auth (and injects `X-API-Key`).
+   There is no `VITE_API_KEY` — a key must never be baked into the browser bundle.
 
 ## Single-process demo (API + built UI)
 
@@ -110,6 +116,10 @@ docker pull ghcr.io/jpsutton/apcontroller:latest
 
 ### Run
 
+The image **fails closed**: it refuses to start on a non-loopback bind unless
+`APCTRL_API_KEY` is set (see [Security](#security)). Set a key for any exposed
+deployment:
+
 ```bash
 docker run -d --name apcontroller \
   -p 8080:8080 \
@@ -119,7 +129,7 @@ docker run -d --name apcontroller \
 ```
 
 - `/data` holds the persistent `config.json` — keep it on a named volume or bind mount.
-- Set `APCTRL_API_KEY` and send `X-API-Key` on every `/api/v1/*` request (see
+- Send `X-API-Key` on every `/api/v1/*` request (see
   [Environment variables](#environment-variables)); put the app behind a TLS
   reverse proxy for anything beyond localhost.
 - To use SSH key-based device login, mount your key read-only and set each
@@ -132,12 +142,15 @@ Or with Compose, swap `build: .` for the published image:
 services:
   apcontroller:
     image: ghcr.io/jpsutton/apcontroller:latest   # or :vX.Y.Z
+    # Published on host loopback only. To expose on the LAN, set APCTRL_API_KEY
+    # and map "0.0.0.0:8084:8080" (then drop APCTRL_ALLOW_INSECURE_BIND).
     ports:
-      - "8084:8080"
+      - "127.0.0.1:8084:8080"
     volumes:
       - apctrl-data:/data
     environment:
       APCTRL_API_KEY: ${APCTRL_API_KEY:-}
+      APCTRL_ALLOW_INSECURE_BIND: ${APCTRL_ALLOW_INSECURE_BIND:-1}
 volumes:
   apctrl-data:
 ```
@@ -152,17 +165,42 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-## TLS (reverse proxy)
+## Security
 
-Terminate TLS in front of the app (recommended). Example **Caddy**:
+This controller holds AP SSH credentials and Wi-Fi PSKs and can run scripts as
+root on every managed AP, so treat it as sensitive infrastructure.
 
-```caddy
-apcontroller.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
+- **Fail-closed bind.** Default bind is `127.0.0.1`. Binding a non-loopback
+  interface (e.g. `APCTRL_HOST=0.0.0.0`) with **no** `APCTRL_API_KEY` set is
+  refused at startup. Set a strong key, or set `APCTRL_ALLOW_INSECURE_BIND=1`
+  only when exposure is controlled externally (e.g. a host-loopback container
+  port map).
+- **Transport.** The app speaks plain HTTP. For any non-loopback access put it
+  behind a TLS-terminating reverse proxy — otherwise the API key and all
+  secrets (`GET /api/v1/config`, `GET /api/v1/status?include_secrets=true`
+  return plaintext passwords/PSKs) travel the network in the clear. Example
+  **Caddy**:
 
-Set `APCTRL_API_KEY` and require `X-API-Key` from the proxy, or add application-level auth later.
+  ```caddy
+  apcontroller.example.com {
+      reverse_proxy 127.0.0.1:8080
+      # Optionally add auth here and inject the key upstream:
+      # reverse_proxy 127.0.0.1:8080 { header_up X-API-Key {env.APCTRL_API_KEY} }
+  }
+  ```
+
+- **CORS** is off by default (the SPA is served same-origin). Set
+  `APCTRL_CORS_ORIGINS` to explicit origins only if you serve the UI
+  cross-origin; a wildcard is never combined with credentials.
+- **SSH host keys** are pinned on first contact (`accept-new` TOFU) in
+  `<state_dir>/known_hosts`; a later key change is refused. Override with
+  `APCTRL_SSH_STRICT` (`yes` = strict, `no` = disabled, lab only). If an AP is
+  reflashed, remove its line from `known_hosts`.
+- **Input validation.** Host/Wi-Fi/VLAN config fields are validated (IP/hostname,
+  identifier, and length/charset rules) so a config value cannot be turned into
+  an SSH/ping argument or path-traversal payload.
+- Config and on-disk artifacts are written `0600`; run the service as an
+  unprivileged user (the container and systemd unit already do).
 
 ## Migrating from UCI (`uci export apcontroller`)
 
@@ -198,10 +236,15 @@ See [deploy/apcontroller-standalone.service](deploy/apcontroller-standalone.serv
 | Variable | Meaning |
 |----------|---------|
 | `APCTRL_CONFIG_PATH` | JSON config file (default `./data/config.json` in dev) |
+| `APCTRL_STATE_DIR` | Status cache / activity logs / SSH `known_hosts` (default: config dir) |
 | `APCTRL_BUNDLE_PATH` | Directory with `apcontroller-agent`, `apcontroller-agent-setconfig`, `scripts/` |
 | `APCTRL_STATIC_DIR` | Built SPA directory (`frontend/dist`) |
-| `APCTRL_API_KEY` | If set, required `X-API-Key` on `/api/v1/*` |
-| `APCTRL_CORS_ORIGINS` | Comma-separated origins or `*` |
+| `APCTRL_HOST` | Bind address (default `127.0.0.1`) |
+| `APCTRL_PORT` | Bind port (default `8080`) |
+| `APCTRL_API_KEY` | If set, required `X-API-Key` on `/api/v1/*`. Required to bind non-loopback |
+| `APCTRL_ALLOW_INSECURE_BIND` | Set `1` to permit a non-loopback bind with no key (exposure controlled externally) |
+| `APCTRL_SSH_STRICT` | SSH host-key policy: `accept-new` (default), `yes`, or `no` |
+| `APCTRL_CORS_ORIGINS` | Comma-separated origins (empty = none). Wildcard allowed only without credentials |
 
 ## Regenerating OpenAPI JSON
 
